@@ -1,4 +1,4 @@
-# sam-to-bam [![Build Status](https://travis-ci.org/t-ogasawara/sam-to-bam.svg?branch=master)](https://travis-ci.org/t-ogasawara/sam-to-bam) [![MIT License](http://img.shields.io/badge/license-MIT-blue.svg?style=flat)](LICENSE)
+# sam-to-bam [![MIT License](http://img.shields.io/badge/license-MIT-blue.svg?style=flat)](LICENSE)
 A fast genome file format converter
 
 ## HOW TO BUILD
