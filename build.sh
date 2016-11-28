@@ -35,10 +35,10 @@ mkdir -p ${SRC}
 echo Download the files
 #
 cd ${ORG}
-git clone git://${IP}/samtools/samtools.git
-git clone git://${IP}/samtools/htslib.git
+git clone https://${IP}/samtools/samtools.git
+git clone https://${IP}/samtools/htslib.git
 cd ../${SRC}
-git clone git://${IP}/t-ogasawara/sam-to-bam.git
+git clone https://${IP}/t-ogasawara/sam-to-bam.git
 cd ../${ORG}/samtools
 git checkout 0c5617ecd9c3930024bfcec02ac0796c1abfbd67 >& /dev/null
 cd ../htslib
