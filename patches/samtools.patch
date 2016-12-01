@@ -17,10 +17,10 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 # DEALINGS IN THE SOFTWARE.
-diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x q -x '*~' -x '*.c.*' -x '*.a' -x .git -x .svn -x '*.MIT' -x '*.swp' 00_svn_r2/samtools-2015-08-19/samtools/bam_sam2bam.c ../files/samtools/bam_sam2bam.c
+diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x q -x '*~' -x '*.c.*' -x '*.a' -x .git -x .svn -x '*.MIT' -x '*.swp' -x 'svn-commit.tmp*' 00_svn_r2/samtools-2015-08-19/samtools/bam_sam2bam.c ../files/samtools/bam_sam2bam.c
 --- 00_svn_r2/samtools-2015-08-19/samtools/bam_sam2bam.c	1970-01-01 09:00:00.000000000 +0900
-+++ ../files/samtools/bam_sam2bam.c	2016-10-31 18:32:09.739945744 +0900
-@@ -0,0 +1,7915 @@
++++ ../files/samtools/bam_sam2bam.c	2016-12-01 14:57:55.686907391 +0900
+@@ -0,0 +1,7925 @@
 +#define _BAM_SAM2BAM_C
 +/*  bam_sam2bam.c
 +
@@ -176,8 +176,8 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +/*  bam_sam2bam.c -- format converter framework
 +
 +    Author: Takeshi Ogasawara <takeshi@jp.ibm.com>
-+	$Rev: 85 $
-+	$Date: 2016-10-31 18:32:09 +0900 (Mon, 31 Oct 2016) $
++	$Rev: 86 $
++	$Date: 2016-11-28 15:00:42 +0900 (Mon, 28 Nov 2016) $
 +
 +	*/
 +
@@ -5679,6 +5679,9 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +	fprintf(stderr, "(I) +----+----+----+----+----+----+----+----+----+----+\n");
 +  	for (i=0; i<50; i++) fprintf(stderr, ".");
 +  	fprintf(stderr, "\n");
++        while (0 == (rd_progress_bytes = p_blkrd->read_bytes)) {
++          sleep(1);
++        }
 +        rd_progress_initialized = 1;
 +	if (!filters.use_baminfo && !wr_progress_initialized) {
 +	  sleep(1);
@@ -5892,6 +5895,7 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +  b->block_seqid = block_seqid_m;
 +  __block_seqid++;
 +  mt_linesplit_enqueue(mt->linesplit, b, myid); 
++  mt->read_bytes += b->block_len;
 +
 +  while(1){
 +    blkrd_t *b = md_blkrd_alloc(&mt->blkrd_free_list2, my_fl);
@@ -7201,7 +7205,7 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +    qname_hash_bucket = md_malloc(sizeof(*qname_hash_bucket)*QNAME_HASH_SIZE, mem_bamGetQnameId1, 1);
 +}
 +PROFILE_MEM_INIT();
-+fprintf(stderr, "(I) sam-to-bam $Rev: 85 $\n");
++fprintf(stderr, "(I) sam-to-bam $Rev: 86 $\n");
 +#if !defined(DEBUG_POS)
 +fprintf(stderr, "(I) **** built with no DEBUG_POS feature\n");
 +#endif
@@ -7294,7 +7298,7 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +	    //fixed n_block_reader = 1; // on core0
 +	    // NA12878.bwa.sam
 +	    if (filters.use_baminfo) {
-+	    n_line_splitter = 2; // 8 threads per core for core1-23 (total 184 threads) ~1.9 GB/s
++	    n_line_splitter = 2; // 8 threads per core for core1-23 (total 184 threads) -- GB/s
 +	    n_sam_parser = 70;
 +	    n_bam_copier = 39;
 +	    n_hash_adder = 73;
@@ -7312,16 +7316,22 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +#endif
 +	    break;
 +	  case 20: // firestone
-+	    n_line_splitter = 3; // 4 threads per core for core1-19 (total 76 threads) ~3.0 GB/s
-+	    n_sam_parser = 29;
-+	    n_bam_copier = 20;
-+	    n_hash_adder = 24;
++	    n_line_splitter = 4; // 4 threads per core for core1-19 (total 76 threads) ~3.0 GB/s
++	    n_sam_parser = 57;
++	    n_bam_copier = 59;
++	    n_hash_adder = 32;
 +	    break;
 +	  case 16: // firestone
-+	    n_line_splitter = 3;
-+	    n_sam_parser = 27;
-+	    n_bam_copier = 20;
++	    n_line_splitter = 3; // used for WGS dataset in our PLoS ONE paper
++	    n_sam_parser = 57;
++	    n_bam_copier = 50;
 +	    n_hash_adder = 10;
++#if 0
++	    n_line_splitter = 3; // used for WEX dataset in our PLoS ONE paper
++	    n_sam_parser = 43;
++	    n_bam_copier = 55;
++	    n_hash_adder = 19;
++#endif
 +	  case 8: // firestone (e.g., SoftLayer C812)
 +	    n_line_splitter = 1;
 +	    n_sam_parser = 34;
@@ -7936,7 +7946,7 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +// vim: set foldmethod=marker :
 +
 +
-diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x q -x '*~' -x '*.c.*' -x '*.a' -x .git -x .svn -x '*.MIT' -x '*.swp' 00_svn_r2/samtools-2015-08-19/samtools/bam_sam2bam.h ../files/samtools/bam_sam2bam.h
+diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x q -x '*~' -x '*.c.*' -x '*.a' -x .git -x .svn -x '*.MIT' -x '*.swp' -x 'svn-commit.tmp*' 00_svn_r2/samtools-2015-08-19/samtools/bam_sam2bam.h ../files/samtools/bam_sam2bam.h
 --- 00_svn_r2/samtools-2015-08-19/samtools/bam_sam2bam.h	1970-01-01 09:00:00.000000000 +0900
 +++ ../files/samtools/bam_sam2bam.h	2016-07-13 19:12:20.000000000 +0900
 @@ -0,0 +1,269 @@
@@ -8209,7 +8219,7 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +#endif
 +
 +
-diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x q -x '*~' -x '*.c.*' -x '*.a' -x .git -x .svn -x '*.MIT' -x '*.swp' 00_svn_r2/samtools-2015-08-19/samtools/bam_sort.c ../files/samtools/bam_sort.c
+diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x q -x '*~' -x '*.c.*' -x '*.a' -x .git -x .svn -x '*.MIT' -x '*.swp' -x 'svn-commit.tmp*' 00_svn_r2/samtools-2015-08-19/samtools/bam_sort.c ../files/samtools/bam_sort.c
 --- 00_svn_r2/samtools-2015-08-19/samtools/bam_sort.c	2015-08-19 17:55:53.807903000 +0900
 +++ ../files/samtools/bam_sort.c	2015-10-13 18:59:54.830266751 +0900
 @@ -796,7 +796,7 @@ int bam_merge_core2(int by_qname, const 
@@ -8230,7 +8240,7 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
      for (i = 0; i < l; ++i)
          sam_write1(fp, h, buf[i]);
      sam_close(fp);
-diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x q -x '*~' -x '*.c.*' -x '*.a' -x .git -x .svn -x '*.MIT' -x '*.swp' 00_svn_r2/samtools-2015-08-19/samtools/bamtk.c ../files/samtools/bamtk.c
+diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x q -x '*~' -x '*.c.*' -x '*.a' -x .git -x .svn -x '*.MIT' -x '*.swp' -x 'svn-commit.tmp*' 00_svn_r2/samtools-2015-08-19/samtools/bamtk.c ../files/samtools/bamtk.c
 --- 00_svn_r2/samtools-2015-08-19/samtools/bamtk.c	2015-08-19 17:55:53.807903000 +0900
 +++ ../files/samtools/bamtk.c	2016-01-22 16:58:37.491773430 +0900
 @@ -40,6 +40,7 @@ int bam_sort(int argc, char *argv[]);
@@ -8257,7 +8267,7 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
      else if (strcmp(argv[1], "flagstat") == 0)  ret = bam_flagstat(argc-1, argv+1);
      else if (strcmp(argv[1], "calmd") == 0)     ret = bam_fillmd(argc-1, argv+1);
      else if (strcmp(argv[1], "fillmd") == 0)    ret = bam_fillmd(argc-1, argv+1);
-diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x q -x '*~' -x '*.c.*' -x '*.a' -x .git -x .svn -x '*.MIT' -x '*.swp' 00_svn_r2/samtools-2015-08-19/samtools/Makefile ../files/samtools/Makefile
+diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x q -x '*~' -x '*.c.*' -x '*.a' -x .git -x .svn -x '*.MIT' -x '*.swp' -x 'svn-commit.tmp*' 00_svn_r2/samtools-2015-08-19/samtools/Makefile ../files/samtools/Makefile
 --- 00_svn_r2/samtools-2015-08-19/samtools/Makefile	2015-08-19 17:55:53.807903000 +0900
 +++ ../files/samtools/Makefile	2016-10-21 18:49:17.186875217 +0900
 @@ -21,18 +21,29 @@
@@ -8328,7 +8338,7 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
  .PHONY: lib mostlyclean tags test testclean
 +
 +-include $(DEPS)
-diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x q -x '*~' -x '*.c.*' -x '*.a' -x .git -x .svn -x '*.MIT' -x '*.swp' 00_svn_r2/samtools-2015-08-19/samtools/sam.c ../files/samtools/sam.c
+diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x q -x '*~' -x '*.c.*' -x '*.a' -x .git -x .svn -x '*.MIT' -x '*.swp' -x 'svn-commit.tmp*' 00_svn_r2/samtools-2015-08-19/samtools/sam.c ../files/samtools/sam.c
 --- 00_svn_r2/samtools-2015-08-19/samtools/sam.c	2015-08-19 17:55:53.807903000 +0900
 +++ ../files/samtools/sam.c	2015-10-13 18:57:25.755999568 +0900
 @@ -31,7 +31,7 @@ DEALINGS IN THE SOFTWARE.  */
@@ -8340,7 +8350,7 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
      return 0;
  }
  
-diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x q -x '*~' -x '*.c.*' -x '*.a' -x .git -x .svn -x '*.MIT' -x '*.swp' 00_svn_r2/samtools-2015-08-19/samtools/sam_view.c ../files/samtools/sam_view.c
+diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x q -x '*~' -x '*.c.*' -x '*.a' -x .git -x .svn -x '*.MIT' -x '*.swp' -x 'svn-commit.tmp*' 00_svn_r2/samtools-2015-08-19/samtools/sam_view.c ../files/samtools/sam_view.c
 --- 00_svn_r2/samtools-2015-08-19/samtools/sam_view.c	2015-08-19 17:55:53.807903000 +0900
 +++ ../files/samtools/sam_view.c	2015-10-13 18:59:29.958389015 +0900
 @@ -403,7 +403,7 @@ int main_samview(int argc, char *argv[])
@@ -8352,7 +8362,7 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
      if (is_header_only) goto view_end; // no need to print alignments
  
      if (optind + 1 >= argc) { // convert/print the entire file
-diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x q -x '*~' -x '*.c.*' -x '*.a' -x .git -x .svn -x '*.MIT' -x '*.swp' 00_svn_r2/samtools-2015-08-19/samtools/test.c ../files/samtools/test.c
+diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x q -x '*~' -x '*.c.*' -x '*.a' -x .git -x .svn -x '*.MIT' -x '*.swp' -x 'svn-commit.tmp*' 00_svn_r2/samtools-2015-08-19/samtools/test.c ../files/samtools/test.c
 --- 00_svn_r2/samtools-2015-08-19/samtools/test.c	1970-01-01 09:00:00.000000000 +0900
 +++ ../files/samtools/test.c	2016-01-25 18:56:16.570978207 +0900
 @@ -0,0 +1,19 @@
