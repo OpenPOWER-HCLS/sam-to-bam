@@ -19,8 +19,8 @@
 # DEALINGS IN THE SOFTWARE.
 diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x q -x '*~' -x '*.c.*' -x '*.a' -x .git -x .svn -x '*.MIT' -x '*.swp' -x 'svn-commit.tmp*' 00_svn_r2/samtools-2015-08-19/samtools/bam_sam2bam.c ../files/samtools/bam_sam2bam.c
 --- 00_svn_r2/samtools-2015-08-19/samtools/bam_sam2bam.c	1970-01-01 09:00:00.000000000 +0900
-+++ ../files/samtools/bam_sam2bam.c	2016-12-01 14:57:55.686907391 +0900
-@@ -0,0 +1,7925 @@
++++ ../files/samtools/bam_sam2bam.c	2017-01-24 18:36:11.095730042 +0900
+@@ -0,0 +1,7982 @@
 +#define _BAM_SAM2BAM_C
 +/*  bam_sam2bam.c
 +
@@ -110,6 +110,9 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +  int use_nproc;
 +  int hts_proc_offset;
 +  int hts_nproc;
++  int n_targets; // header->n_targets
++  int create_bai;
++  const char *fnout;
 +  int map[];
 +} cpu_map_t;
 +static cpu_map_t *cpu_map;  
@@ -176,8 +179,8 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +/*  bam_sam2bam.c -- format converter framework
 +
 +    Author: Takeshi Ogasawara <takeshi@jp.ibm.com>
-+	$Rev: 86 $
-+	$Date: 2016-11-28 15:00:42 +0900 (Mon, 28 Nov 2016) $
++	$Rev: 91 $
++	$Date: 2017-01-24 18:36:10 +0900 (Tue, 24 Jan 2017) $
 +
 +	*/
 +
@@ -651,15 +654,36 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +}
 +
 +// The unclipped pos can be negative. For example, POS=1 and CIGAR=68S...
-+#define CLIPPED_TID_OFFSET	1
-+#define CLIPPED_POS_OFFSET	1
-+#define UNCLIPPED_TID_OFFSET	1
-+#define UNCLIPPED_POS_OFFSET	(64*1024)
++//#define CLIPPED_TID_OFFSET	1
++//#define CLIPPED_POS_OFFSET	1
++#define wrap_bam1_tid(bam1_tid)		((bam1_tid) + 1)	// convert signed (-1~2^31) to unsigned (0~2^31+1)
++#define unwrap_tid(tid)			((tid) - 1)
++#define wrap_bam1_clipped_pos(bam1_pos)	((bam1_pos) + 1)	// convert signed (-1~2^31) to unsigned (0~2^31+1)
++#define unwrap_clipped_pos(pos)		((pos) - 1)
++//#define UNCLIPPED_TID_OFFSET	1
++//#define UNCLIPPED_POS_OFFSET	(64*1024)
++#define UC_POS_OFFSET	(64*1024)
++#define wrap_bam1_unclipped_pos(bam1_unclipped_pos)	(assert_wrap_bam1_unclipped_pos(bam1_unclipped_pos), (uint32_t)((bam1_unclipped_pos) + UC_POS_OFFSET))	// convert signed (-X~2^31-X) to unsigned (C-X~2^31+C-X)
++#define unwrap_unclipped_pos(unclipped_pos)		((int32_t)((int64_t)(unclipped_pos) - UC_POS_OFFSET))
++static inline void assert_wrap_bam1_unclipped_pos(int32_t bam1_unclipped_pos) {
++  if(bam1_unclipped_pos < 0 ) {
++    if(bam1_unclipped_pos < -UC_POS_OFFSET){
++      fprintf(stderr,"wrap_bam1_unclipped_pos: unclipped pos %d must be >= -%d\n", bam1_unclipped_pos, UC_POS_OFFSET); 
++      exit(-1);
++    }
++  } else { // bam1_unclipped_pos >= 0
++    if((uint64_t)bam1_unclipped_pos + UC_POS_OFFSET > (uint64_t)UINT_MAX){
++      fprintf(stderr,"wrap_bam1_unclipped_pos: unclipped pos %d must be <= %d\n", bam1_unclipped_pos, UINT_MAX - UC_POS_OFFSET); 
++      exit(-1);
++    }
++  }
++}
 +
 +static inline uint32_t get_offset_unclipped_pos(bam1_t *b) {
-+  int32_t u_p = get_unclipped_pos0(b) + UNCLIPPED_POS_OFFSET;
-+  if (u_p < 0) { fprintf(stderr, "%s pos %d unclipped_pos 0x%9x (%d) + offset %d < 0\n", bam_get_qname(b), b->core.pos, u_p, u_p, UNCLIPPED_POS_OFFSET); exit(-1);}
-+  return (uint32_t)u_p;
++  //int32_t u_p = wrap_bam1_unclipped_pos(get_unclipped_pos0(b));
++  //if (u_p < 0) { fprintf(stderr, "%s pos %d unclipped_pos 0x%9x (%d) + offset %d < 0\n", bam_get_qname(b), b->core.pos, u_p, u_p, UNCLIPPED_POS_OFFSET); exit(-1);}
++  //return (uint32_t)u_p;
++  return wrap_bam1_unclipped_pos(get_unclipped_pos0(b));
 +}
 +
 +static inline uint32_t get_offset_unclipped_pos_from_index(int i, int j){
@@ -672,16 +696,18 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +  return (uint32_t)(((((vid_t)i)*BUCKET_SIZE + (vid_t)j)>>POS_BITS)&TID_MASK);
 +}
 +
-+static inline uint64_t gen_id_clipped(vid_t tid, vid_t pos) {
-+	const vid_t tid1 = (vid_t)((int64_t)tid + CLIPPED_TID_OFFSET)/* tid can be -1 for unmapped reads */;
-+	const vid_t pos1 = (vid_t)((int64_t)pos + CLIPPED_POS_OFFSET)/* pos can be -1 for unmapped reads */ ;
-+	if (tid1 > MAX_TID) { fprintf(stderr, "gen_id_clipped: tid 0x%09lx (%ld) > 0x%09lx\n", tid1, tid1, MAX_TID); exit(-1);}
++static inline uint64_t gen_id_clipped(vid_t tid1, vid_t pos1) {
++	//const vid_t tid1 = (vid_t)((int64_t)tid + CLIPPED_TID_OFFSET)/* tid can be -1 for unmapped reads */;
++	//const vid_t pos1 = (vid_t)((int64_t)pos + CLIPPED_POS_OFFSET)/* pos can be -1 for unmapped reads */ ;
++	if (tid1 > MAX_TID) { 
++          fprintf(stderr, "gen_id_clipped: tid 0x%09lx (%ld) > 0x%09lx\n", tid1, tid1, MAX_TID); exit(-1);
++        }
 +	if (pos1 > MAX_POS) { fprintf(stderr, "gen_id_clipped: pos 0x%09lx (%ld) > 0x%09lx\n", pos1, pos1, MAX_POS); exit(-1);}
 +	return (((tid1)<<POS_BITS)|pos1);
 +}
-+static inline uint64_t gen_id_unclipped(vid_t u_tid, vid_t u_pos) {
-+	const vid_t tid1 = (vid_t)((int64_t)u_tid + UNCLIPPED_TID_OFFSET)/* tid can be -1 for unmapped reads */;
-+	const vid_t pos1 = (vid_t)((int64_t)u_pos + UNCLIPPED_POS_OFFSET)/* pos can be -1 for unmapped reads */ ;
++static inline uint64_t gen_id_unclipped(vid_t tid1, vid_t pos1) {
++	//const vid_t tid1 = (vid_t)wrap_bam1_tid((int64_t)bam1_u_tid);
++	//const vid_t pos1 = (vid_t)((int64_t)u_pos + UNCLIPPED_POS_OFFSET)/* pos can be -1 for unmapped reads */ ;
 +	if (tid1 > MAX_TID) { fprintf(stderr, "gen_id_unclipped: tid 0x%09lx (%ld) > 0x%09lx\n", tid1, tid1, MAX_TID); exit(-1);}
 +	if (pos1 > MAX_POS) { fprintf(stderr, "gen_id_unclipped: pos 0x%09lx (%ld) > 0x%09lx\n", pos1, pos1, MAX_POS); exit(-1);}
 +	return (((tid1)<<POS_BITS)|pos1);
@@ -691,7 +717,7 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +	  fprintf(stderr, "cannot calculate the unclipped position for the mate\n");
 +	  exit(-1);
 +	}
-+	const vid_t tid1 = (!is_mate ? b->core.tid : b->core.mtid) + UNCLIPPED_TID_OFFSET /* tid can be -1 for unmapped reads */;
++	const vid_t tid1 = wrap_bam1_tid(!is_mate ? b->core.tid : b->core.mtid);
 +	/* alignment position */
 +	const vid_t pos1 = (!is_mate ? 
 +				  offset_unclipped_pos :
@@ -704,15 +730,13 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +	}
 +	return (((tid1)<<POS_BITS)|pos1);
 +}
-+static inline int32_t get_unclipped_pos_from_index(int i, int j){
-+  return (int32_t)(((int64_t)get_offset_unclipped_pos_from_index(i, j)) - UNCLIPPED_POS_OFFSET);
-+}
++//static inline int32_t get_unclipped_pos_from_index(int i, int j){
++//  return (int32_t)(((int64_t)get_offset_unclipped_pos_from_index(i, j)) - UNCLIPPED_POS_OFFSET);
++//}
 +static inline uint64_t gen_id(bam1_t *b, int is_mate) {
-+	const vid_t tid1 = (!is_mate ? b->core.tid : b->core.mtid) + CLIPPED_TID_OFFSET /* tid can be -1 for unmapped reads */;
++	const vid_t tid1 = wrap_bam1_tid(!is_mate ? b->core.tid : b->core.mtid);
 +	/* alignment position */
-+	const vid_t pos1 = (!is_mate ? 
-+			     b->core.pos + CLIPPED_POS_OFFSET /* pos can be -1 for unmapped reads */ :
-+			     b->core.mpos + CLIPPED_POS_OFFSET /* pos can be -1 for unmapped reads */);
++	const vid_t pos1 = wrap_bam1_clipped_pos(!is_mate ? b->core.pos : b->core.mpos);
 +	if (tid1 > MAX_TID) { 
 +	  fprintf(stderr, "gen_id: tid 0x%09lx (%ld) > 0x%09lx\n", tid1, tid1, MAX_TID); exit(-1);
 +	}
@@ -721,11 +745,11 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +	}
 +	return (((tid1)<<POS_BITS)|pos1);
 +}
-+static inline int32_t get_pos_from_index(int i, int j){
-+  return (int32_t)(((int64_t)get_offset_pos_from_index(i,j)) - CLIPPED_POS_OFFSET);
++static inline int32_t get_bam1_pos_from_index(int i, int j){
++  return unwrap_clipped_pos((int32_t)(((int64_t)get_offset_pos_from_index(i,j))));
 +}
-+static inline int32_t get_tid_from_index(int i, int j){
-+  return (int32_t)(((int64_t)(((((vid_t)i)*BUCKET_SIZE + (vid_t)j)>>POS_BITS)&TID_MASK)) - CLIPPED_TID_OFFSET);
++static inline int32_t get_bam1_tid_from_index(int i, int j){
++  return unwrap_tid((int32_t)(((int64_t)(((((vid_t)i)*BUCKET_SIZE + (vid_t)j)>>POS_BITS)&TID_MASK))));
 +}
 +
 +static inline bucket_t *get_bucket(int bucket_index, bucket_array_t *bucket_array, int alloc);
@@ -734,14 +758,16 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +#define INVALID_UNCLIP	SHRT_MIN
 +
 +static inline bamptr_t * bamptr_C2U(bamptr_t *bampC, bucket_array_t *bucketU_array, int i, int j ) {
-+  const int64_t c_tid = get_tid_from_index(i, j);
-+  const int64_t u_tid = c_tid;
-+  const int64_t c_pos = get_pos_from_index(i, j);
++  const int64_t bam1_c_tid = get_bam1_tid_from_index(i, j);
++  const int64_t bam1_u_tid = bam1_c_tid;
++  const int64_t bam1_c_pos = get_bam1_pos_from_index(i, j);
 +  const int16_t unclip = bamptr_get_unclip(bampC);
 +  bamptr_t *bampU = NULL;
 +
 +  if (INVALID_UNCLIP != unclip) {
-+    const vid_t u_pos = (vid_t)(c_pos + unclip);
++    const int64_t bam1_u_pos = bam1_c_pos + unclip;
++    const vid_t u_tid = wrap_bam1_tid(bam1_u_tid);
++    const vid_t u_pos = wrap_bam1_unclipped_pos(bam1_u_pos);
 +    const vid_t u_id = gen_id_unclipped(u_tid, u_pos);
 +    const int u_bucket_index = get_index1(u_id);
 +    const int u_bucket_index2 = get_index2(u_id);
@@ -873,11 +899,12 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +      exit(-1);
 +    }
 +    if (0 == ((b)->core.flag & BAM_FUNMAP)) {
-+      int64_t const unclip = (int64_t)offset_unclipped_pos - UNCLIPPED_POS_OFFSET - b->core.pos;
-+      if (SHRT_MIN < unclip && unclip <= SHRT_MAX) {
++      //int64_t const unclip = (int64_t)offset_unclipped_pos - UNCLIPPED_POS_OFFSET - b->core.pos;
++      int64_t const unclip = (int64_t)unwrap_unclipped_pos(offset_unclipped_pos) - b->core.pos;
++      if (INT_MIN <= unclip && unclip <= INT_MAX) {
 +        baminfo1->c.unclip  = unclip;
 +      } else {
-+        fprintf(stderr, "(E) clip length %ld cannot be expressed in 16 bits. %u %s %d %d %d\n", unclip, offset_unclipped_pos, bam_get_qname(b), b->core.flag, b->core.tid, b->core.pos);
++        fprintf(stderr, "(E) clip length %ld cannot be expressed in 32 bits. = unwrap(%u)=%d-%d (%s flag %d tid %d pos %d)\n", unclip, offset_unclipped_pos, unwrap_unclipped_pos(offset_unclipped_pos), b->core.pos, bam_get_qname(b), b->core.flag, b->core.tid, b->core.pos);
 +        exit(-1);
 +      }
 +    } else {
@@ -888,10 +915,10 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +    baminfo1->u.qnameid = qnameid;
 +    baminfo1->u.flag    = b->core.flag;
 +    baminfo1->u.libid   = bam_get_libid(h,b);
-+    baminfo1->u.tid     = b->core.tid;
-+    baminfo1->u.mtid	= b->core.mtid;
-+    baminfo1->u.pos     = b->core.pos;
-+    baminfo1->u.mpos    = b->core.mpos;
++    baminfo1->u.tid     = b->core.tid + 1;		// convert signed (-1~2^31) to unsigned (0~2^31+1)
++    baminfo1->u.mtid	= b->core.mtid + 1;		// convert signed (-1~2^31) to unsigned (0~2^31+1)
++    baminfo1->u.pos     = b->core.pos + 1;		// convert signed (-1~2^31) to unsigned (0~2^31+1)
++    baminfo1->u.mpos    = b->core.mpos + 1;		// convert signed (-1~2^31) to unsigned (0~2^31+1)
 +    baminfo1->u.mapqL   = (b->core.qual&((1<<MAPQL_BITS)-1));
 +    baminfo1->u.mapqH   = (b->core.qual>>MAPQL_BITS);
 +    if (TLEN_MIN <= b->core.l_qseq && b->core.l_qseq <= TLEN_MAX) {
@@ -1206,8 +1233,8 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +#define ILM18_MAX_INST	((1UL<<ILM18_BITS_INST)-1)
 +
 +#define SRA_BITS_ORG	4
-+#define SRA_BITS_ACC	20
-+#define SRA_BITS_SPOT	40
++#define SRA_BITS_ACC	24
++#define SRA_BITS_SPOT	36
 +#define SRA_MAX_ORG	((1UL<<SRA_BITS_ORG)-1)
 +#define SRA_MAX_ACC	((1UL<<SRA_BITS_ACC)-1)
 +#define SRA_MAX_SPOT	((1UL<<SRA_BITS_SPOT)-1)
@@ -1286,7 +1313,7 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +  memcpy(qn, instStr, len); 
 +  qn[len] = ':';
 +  // 20FUKAAXX100202:
-+  sprintf(&qn[len+1], "%d", (int)lane);
++  sprintf(&qn[len+1], "%d", (int)lane+1);
 +  len = strlen(qn);
 +  qn[len] = ':';
 +  // 20FUKAAXX100202:3:
@@ -1389,7 +1416,7 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +  len += (1+flowStrLen);
 +  qn[len] = ':';
 +  // HWI-D00402:119:C6BUCANXX:
-+  sprintf(&qn[len+1+flowStrLen+1], "%d", (int)lane);
++  sprintf(&qn[len+1+flowStrLen+1], "%d", (int)lane+1);
 +  len = strlen(qn);
 +  qn[len] = ':';
 +  // HWI-D00402:119:C6BUCANXX:1:
@@ -1502,17 +1529,21 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +static uint64_t hashv_SRR(char *qn, int l_qname){
 +    char * endp;
 +    int64_t const spot = strtoll(qn+10 /* skip xRR012345. */, &endp, 10);
-+    if (spot > 0xFFFFFFFFFF /* 5 bytes*/) {
-+      fprintf(stderr, "(E) ** change the type of num2 from uint32_t to uint64_t for SRR<num>.<num2>\n");
-+      exit(-1);
-+    }
 +    if (errno == ERANGE) {
 +      fprintf(stderr, "(E) ** too large spot number: %s\n", qn);
 +      exit(-1);
 +    }
++    if (spot > SRA_MAX_SPOT) {
++      fprintf(stderr, "(E) ** spot number %ld is too large (> %ld)\n", spot, SRA_MAX_SPOT);
++      exit(-1);
++    }
 +    int64_t const acc = strtoll(qn+3 /* skip xRR */, &endp, 10);
-+    if (acc > 999999 /* xRR followed by a 6-digit number */ || errno == ERANGE) {
++    if (errno == ERANGE) {
 +      fprintf(stderr, "(E) ** too large accession number: %s\n", qn);
++      exit(-1);
++    }
++    if (acc > SRA_MAX_ACC /* xRR followed by a 6-digit number */) {
++      fprintf(stderr, "(E) ** accession number %ld is too large (>%ld)\n", acc, SRA_MAX_ACC);
 +      exit(-1);
 +    }
 +    uint64_t const hashv = (qn[0]=='S'?0ULL:(qn[0]=='E'?1ULL:2ULL))<<(SRA_BITS_ACC+SRA_BITS_SPOT) 
@@ -1757,7 +1788,7 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +  strcpy(str, inst[ix]);
 +  int n = strlen(str);
 +  str[n++] = ':';
-+  n += snprintf(&str[n], l_qname-n, "%lu", lane);
++  n += snprintf(&str[n], l_qname-n, "%lu", lane+1);
 +  str[n++] = ':';
 +  n += snprintf(&str[n], l_qname-n, "%lu", tile);
 +  str[n++] = ':';
@@ -1795,7 +1826,7 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +  strcpy(&str[n], flowcell18[fx]);
 +  n += strlen(flowcell18[fx]);
 +  str[n++] = ':';
-+  n += snprintf(&str[n], l_qname-n, "%lu", lane);
++  n += snprintf(&str[n], l_qname-n, "%lu", lane+1);
 +  str[n++] = ':';
 +  n += snprintf(&str[n], l_qname-n, "%lu", tile);
 +  str[n++] = ':';
@@ -2548,6 +2579,17 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +  PREFETCH_HASHADD_RW_LOCALITY0(bucket->ba[bucket_index2]);
 +
 +  add_to_bucket(bucket, bucket_index2, baminfo1);
++#if 0
++{{{
++bam1_t * const b = bam_vaddr_get_ptr(&baminfo1->c.bamva);
++int flag = b->core.flag;
++if ((0 == (flag & BAM_FUNMAP)) &&
++    (0 == (flag & BAM_FSECONDARY)) &&
++    (0 == (flag & BAM_FSUPPLEMENTARY))) {
++fprintf(stderr, "add: gen_id(b,0) %ld index1 %d index2 %d %s bam_flag %d bam_tid %d bam_pos %d\n", id, bucket_index, bucket_index2, bam_get_qname(b), flag, b->core.tid, b->core.pos);
++}
++}}}
++#endif
 +}
 +
 +static inline void read_pool_add_unclipped(baminfo1_t *baminfo1, bucket_array_t *bucketU_array, vid_t u_id DCL_ARG_QNAMEID_CACHE(p_cache)) {
@@ -3548,6 +3590,12 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +    if (mi->dup) {
 +      b->core.flag |= BAM_FDUP; /* mark dup */
 +    }
++
++    /* save info for creating .bai */
++    mi->tid = b->core.tid;
++    mi->pos = b->core.pos;
++    mi->endpos = bam_endpos(b);
++    mi->unmap = (0 != (b->core.flag&BAM_FUNMAP));
 +
 +    /* copy the data as bam_write1() does */
 +    uint32_t x[8]; 
@@ -4928,6 +4976,7 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +  short const flag = bamptr_get_flag(bamp);
 +  if(has_mate(flag)
 +    && (0 == (flag & BAM_FSECONDARY)) // skip not-primary alignments (e.g., if there are pri1, pri2, and sec1 alignments, either pri1-pri2 or sec1-pri2 are paired, but sec1-pri2 is ignored) 
++    && (0 == (flag & BAM_FSUPPLEMENTARY)) // skip supplimentary alignments
 +    ){
 +	uint64_t const qnameid = bamptr_get_qnameid(bamp);
 +	uint32_t const idx0 = qnameid % hash_size;
@@ -6395,7 +6444,7 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +  int sync_done = 0;
 +  long sync_count;
 +  double sync_time;
-+  const int ba_length = prof_bucket_array_max - prof_bucket_array_min; 
++  const int ba_length = prof_bucket_array_max - prof_bucket_array_min + 1; 
 +  const int ba_min = prof_bucket_array_min;
 +
 +  while(!rd_progress_initialized){
@@ -7205,10 +7254,11 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +    qname_hash_bucket = md_malloc(sizeof(*qname_hash_bucket)*QNAME_HASH_SIZE, mem_bamGetQnameId1, 1);
 +}
 +PROFILE_MEM_INIT();
-+fprintf(stderr, "(I) sam-to-bam $Rev: 86 $\n");
++fprintf(stderr, "(I) sam-to-bam $Rev: 91 $\n");
 +#if !defined(DEBUG_POS)
 +fprintf(stderr, "(I) **** built with no DEBUG_POS feature\n");
 +#endif
++fprintf(stderr, "(I) main: sizeof(baminfoU_t) %lu sizeof(baminfoC_t) %lu\n", sizeof(baminfoU_t), sizeof(baminfoC_t));
 +
 +    hts_init_accelerator();
 +
@@ -7241,6 +7291,8 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +#endif
 +  if (0 == fn_i) { // first SAM file
 +    header = sam_hdr_read(fp);
++    cpu_map->n_targets = header->n_targets;
++    cpu_map->fnout = fnout;
 +  }
 +  struct stat st_buf;
 +  st_buf.st_size = 0;
@@ -7332,6 +7384,7 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +	    n_bam_copier = 55;
 +	    n_hash_adder = 19;
 +#endif
++	    break;
 +	  case 8: // firestone (e.g., SoftLayer C812)
 +	    n_line_splitter = 1;
 +	    n_sam_parser = 34;
@@ -7401,6 +7454,10 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +    //bam_free_list2_init(&bam_free_list2);
 +    //line_free_list2_init(&line_free_list2);
 +    //blkrd_free_list2_init(&blkrd_free_list2);
++
++    if (filters.use_baminfo) {
++      cpu_map->create_bai = 1;
++    }
 +
 +    mt_bamwrite_t *p_bamwrite = NULL;
 +
@@ -7578,12 +7635,12 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +  fprintf(stderr, "double-free check done\n");
 +}}}
 +#endif
++prof_bucket_array_min = bucket_array->min;
++prof_bucket_array_max = bucket_array->max;
 +  if (filters.use_baminfo) {
 +    p_prof2 = mt_wrt_throughput_init();
 +  }
 +
-+prof_bucket_array_min = bucket_array->min;
-+prof_bucket_array_max = bucket_array->max;
 +fprintf(stderr, "write index range: %lu - %lu\n", bucket_array->min, bucket_array->max);
 +  size_t mem = 0, n_bam = 0;
 +  const int unsort = g_unsort;
@@ -7849,7 +7906,7 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +}
 +
 +
-+static int sort_usage(FILE *fp, int status)
++static int sam2bam_usage(FILE *fp, int status)
 +{
 +    fprintf(fp,
 +"Usage: samtools sam2bam [options...] -o<out.bam> <in.sam>\n"
@@ -7905,20 +7962,20 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +	  break;
 +	}
 +        case 'l': level = atoi(optarg); break;
-+        default: return sort_usage(stderr, EXIT_FAILURE);
++        default: return sam2bam_usage(stderr, EXIT_FAILURE);
 +        }
 +    }
 +
 +    nargs = argc - optind;
 +    if (argc == 1)
-+        return sort_usage(stdout, EXIT_SUCCESS);
++        return sam2bam_usage(stdout, EXIT_SUCCESS);
 +
 +    strcpy(modeout, "w");
 +    if (sam_open_mode(&modeout[1], fnout, fmtout) < 0) {
 +        if (fmtout) fprintf(stderr, "[bam_sam2bam] can't parse output format \"%s\"\n", fmtout);
 +        else fprintf(stderr, "[bam_sam2bam] can't determine output format\n");
 +        ret = EXIT_FAILURE;
-+        goto sort_end;
++        goto sam2bam_end;
 +    }
 +    if (level >= 0) sprintf(strchr(modeout, '\0'), "%d", level < 9? level : 9);
 +
@@ -7938,7 +7995,7 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +    }
 +    if (bam_sam2bam_core_ext(input_files, tmpprefix, fnout, modeout, g_paging) < 0) ret = EXIT_FAILURE;
 +
-+sort_end:
++sam2bam_end:
 +    free(fnout_buffer.s);
 +    return ret;
 +}
@@ -7948,7 +8005,282 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +
 diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x q -x '*~' -x '*.c.*' -x '*.a' -x .git -x .svn -x '*.MIT' -x '*.swp' -x 'svn-commit.tmp*' 00_svn_r2/samtools-2015-08-19/samtools/bam_sam2bam.h ../files/samtools/bam_sam2bam.h
 --- 00_svn_r2/samtools-2015-08-19/samtools/bam_sam2bam.h	1970-01-01 09:00:00.000000000 +0900
-+++ ../files/samtools/bam_sam2bam.h	2016-07-13 19:12:20.000000000 +0900
++++ ../files/samtools/bam_sam2bam.h	2017-01-12 17:51:21.258556324 +0900
+@@ -0,0 +1,271 @@
++/*  bam_sam2bam.h
++
++    (C) Copyright IBM Corp. 2016
++
++    Author: Takeshi Ogasawara, IBM Research - Tokyo
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in
++all copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
++THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++DEALINGS IN THE SOFTWARE.  */
++
++#include <stdint.h>
++#include <sys/types.h>
++#include "htslib/sam.h"
++
++// #define DEBUG_POS
++
++#define MT_HASH		// enable pipelining between sam_read and registration of reads to the address space
++#define BAMP_ARRAY
++
++//#define BUCKET_BITS	12 // 4K 	// BUCKET_SIZE is 2^BUCKET_BITS
++#define BUCKET_BITS	16 // 64 K	// BUCKET_SIZE is 2^BUCKET_BITS
++
++// SN:1 length 0x0EDB433D
++#define POS_BITS	28
++#define TID_BITS	12 // 12:0-4095 (hg38 has 3366), 8:0-255, 7:0-127
++
++#define MAPQL_BITS		7
++#define TLEN_BITS		23	
++#define TLEN_MAX		((1L<<TLEN_BITS)-1)
++#define TLEN_MIN		(-TLEN_MAX-1)
++
++typedef struct {
++  uint32_t unclipped:1;		// [1]	*** DO NOT MOVE *** (1 bit)
++  uint32_t mapqL    :MAPQL_BITS;// 8
++  uint32_t tid      :TID_BITS;  // 36
++  uint32_t mtid     :TID_BITS;	// 48
++  uint16_t flag;                // 24
++  uint16_t filter_data;         // 64   SAM: 0x21-0x7E, BAM: 0x00-0x5D, 0x5D*704=65472 < UINT16_MAX             *** used only for Clipped POS bamptr
++
++  uint32_t libid    :8;
++  int32_t  mapqH    :1;		// [2]	(1 bit)
++  int32_t  tlen     :TLEN_BITS;	//
++  uint32_t offset_unclipped_pos;// 	offset unclipped position (calculated only for mapped reads)
++
++  uint64_t id;                  //*[3]  The same ID for a bamptr for clipped and a bamptr for unclipped that were created for the same read
++  uint32_t pos;                 // [4]
++  uint32_t mpos;                //
++  uint64_t qnameid;             // [5]	qnameid is used for finding mates
++} baminfoU1_t;
++
++typedef struct {
++  uint8_t  unclipped:1;		// [1] 	*** DO NOT MOVE *** (1 bit)
++  uint8_t  __padding:3;		//	(3 bits)
++#define FLAGL_BITS		4
++  uint8_t  flagL    :4;		//	(4 bits)
++  uint8_t  flagH;
++  uint16_t l_data;              //
++  int32_t  unclip;		//
++  union {                       //*[2]  The same ID for a bamptr for clipped and a bamptr for unclipped that were created for the same read
++    uint64_t bamid;		// needed for finding the bamptr in the clipped bamptr array that is corresponding to a given unclipped bamptr
++				//   if unmapped, there is no unclipped bamptr, therefore, bamid is not used.
++    uint64_t qnameid;		// needed for sortsam. if unmapped, there is no corresponding unclipped bamptr, which has qnameid
++  };
++  bam_vaddr_t bamva;            // [3]  virtual address of BAM record in the repository
++} baminfoC1_t;
++
++typedef struct {
++  uint8_t  unclipped:1;		// [1] 	*** DO NOT MOVE *** (1 bit)
++  uint8_t  __padding:7;
++} baminfo1stByte_t;
++
++typedef struct {
++//  bam1_t *bam__;
++  union{
++    struct {
++      struct {
++        baminfoU1_t info1;      // [1]-[5]	*** DO NOT MOVE ***
++      };
++      struct bamptr *mate_bamp;	// [6]
++    };
++    uint64_t __align__[6];
++  };
++} baminfoU_t;
++
++typedef struct {
++  union{
++    struct {
++      baminfoC1_t info1;        // [1]-[3]	*** DO NOT MOVE ***
++    };
++    uint64_t __align__[3];
++  };
++} baminfoC_t;
++
++typedef struct bamptr {
++#if defined(DEBUG_POS)
++  char *dump_qname;
++#endif
++//  uint8_t unclipped;
++#if !defined(BAMP_ARRAY)
++  struct bamptr *clipped_next;
++  struct bamptr *unclipped_next;// unclipped pos
++#endif
++  union {
++//    struct {
++//      struct bamptr *mate__;
++//    };
++    // declare array[0] so that sizeof(bamptr_t) does not include the size
++    baminfo1stByte_t _unclipped[0];
++    baminfoC_t baminfoC[0];
++    baminfoU_t baminfoU[0];
++  };
++} bamptr_t;
++
++#if defined(BAMP_ARRAY)
++struct bamptr_array {
++union {
++  struct bamptr_array *free_next;
++  struct{
++    int size;
++    int max;            // to extend an array quickly since the array length at (i,j)=(0,0), where unmapped reads are mapped, could be very long
++    bamptr_t bp[];
++  };
++};
++};
++#endif
++
++typedef uint64_t vid_t;
++#if defined(BAMP_ARRAY)
++typedef struct bamptr_array bamptr_array_t;
++#endif
++
++typedef struct bucket_array bucket_array_t;
++
++typedef struct bucket bucket_t;
++
++#define container_of(ptr, type, member) ({ \
++				                const typeof( ((type *)0)->member ) *__mptr = (ptr); \
++				                (type *)( (char *)__mptr - offsetof(type,member) );})
++
++#define KEY_BITS	(TID_BITS+POS_BITS)
++#define KEY_MASK	(-1UL<<(sizeof(vid_t)*8-KEY_BITS)>>(sizeof(vid_t)*8-KEY_BITS))
++#define TID_MASK	(-1UL<<(sizeof(vid_t)*8-TID_BITS)>>(sizeof(vid_t)*8-TID_BITS))
++#define POS_MASK	(-1UL<<(sizeof(vid_t)*8-POS_BITS)>>(sizeof(vid_t)*8-POS_BITS))
++#define MAX_TID		TID_MASK
++#define MAX_POS		POS_MASK
++#define MAX_KEY		KEY_MASK
++
++#define BUCKET_A_BITS	(KEY_BITS-BUCKET_BITS)
++#define BUCKET_MASK	(-1UL<<(sizeof(vid_t)*8-BUCKET_BITS)>>(sizeof(vid_t)*8-BUCKET_BITS))
++#define BUCKET_A_MASK	(-1UL<<(sizeof(vid_t)*8-BUCKET_A_BITS)>>(sizeof(vid_t)*8-BUCKET_A_BITS))
++#define BUCKET_SIZE	(BUCKET_MASK + 1)
++#define BUCKET_ARRAY_LENGTH	(BUCKET_A_MASK + 1)
++#define get_index1(id)	(((BUCKET_A_MASK<<BUCKET_BITS)&(id))>>BUCKET_BITS)
++#define get_index2(id)	(BUCKET_MASK&(id))
++
++struct func_vector_v1 {
++  uint64_t (*bucket_array_get_max)(bucket_array_t*);
++  uint64_t (*bucket_array_get_min)(bucket_array_t*);
++  bamptr_array_t** (*bucket_get_bamptr_array_top)(bucket_t *);
++  int (*bucket_get_max)(bucket_t *);
++  int (*bucket_get_min)(bucket_t *);
++  uint64_t (*gen_id_clipped)(vid_t, vid_t);
++  bucket_t* (*get_bucket)(int, bucket_array_t*, int);
++  int* (*get_cpu_map)(void);
++  bamptr_t* (*get_fifo_list_from_bucket)(bucket_t*, int, int);
++  int  (*get_n_physical_cores)(void);
++  uint32_t (*get_offset_unclipped_pos_from_index)(int, int);
++  void (*md_free)(void *, size_t, long);
++  void*(*md_malloc)(size_t, long, long);
++  void*(*md_realloc)(void *, size_t, long);
++  long (*md_register_mem_id)(const char*);
++
++  uint8_t (*get_libid)(const char*);
++  uint8_t (*bam_get_libid)(bam_hdr_t *h, bam1_t *b) ;
++
++  void (*get_qname)(uint64_t qnameid, char *str, long l_qname, long *len);
++  bamptr_t* (*bamptr_get_U)(bamptr_t *, int, int);
++  int (*picard_sortsam_cmpfunc)(const void *, const void *, void *args);
++
++  int n_threads;
++  bam_hdr_t *header;
++  bucket_array_t *bucket_array;
++  bucket_array_t *bucketU_array;
++};
++
++#define sizeof_bamptr(unclipped)	(sizeof(bamptr_t) + (unclipped ? sizeof(baminfoU_t) : sizeof(baminfoC_t)))
++#define bamptr_get_bamptr(bamp, for_mate)       (assert_u(bamp)(void*)(for_mate ? (bamp)->baminfoU[0].mate_bamp : bamp))
++#define bamptr_get_tid(bamp, for_mate) 	(assert_u(bamp)for_mate ? (bamp)->baminfoU[0].info1.mtid : (bamp)->baminfoU[0].info1.tid)
++#define bamptr_get_pos(bamp, for_mate) 	(assert_u(bamp)for_mate ? (bamp)->baminfoU[0].info1.mpos : (bamp)->baminfoU[0].info1.pos) 
++#define get_bamptr_at(ba, i, unclipped)	((bamptr_t*)((char*)(ba)->bp + sizeof_bamptr(unclipped)*(i)))
++#define bamptrC_get_bamid(bamp) 	(assert_c(bamp)assert_c_mapped(bamp)(bamp)->baminfoC[0].info1.bamid)
++#define bamptrU_get_bamid(bamp) 	(assert_u(bamp)(bamp)->baminfoU[0].info1.id)
++#define bamptr_set_dup(bamp)		{assert_c(bamp)(bamp)->baminfoC[0].info1.flagH |= (BAM_FDUP>>FLAGL_BITS);}
++//#define bamptr_set_rev(bamp)		{assert_c(bamp)(bamp)->baminfoC[0].info1.rev=1;}
++#if defined(DEBUG_POS)
++#define dump_bamptr_get_qname(bamp, for_mate)	((bamp)->dump_qname)
++#else
++#define dump_bamptr_get_qname(bamp, for_mate)	FIXME
++#endif
++#define dump_bamptr_get_mtid(bamp)   (assert_u(bamp)(bamp)->baminfoU[0].mate_bamp ? bamptr_get_tid((bamp)->baminfoU[0].mate_bamp) : -8888 )
++#define bamptr_get_qnameid(bamp)	(assert_u(bamp)(bamp)->baminfoU[0].info1.qnameid)
++#define bamptrC_get_qnameid(bamp)	(assert_c(bamp)assert_c_unmapped(bamp)(bamp)->baminfoC[0].info1.qnameid)
++#define FLAG_NOT_VALID 0x8000 /* not used in SAM*/
++#define bamptr_get_flag(bamp)		(assert_u(bamp)(bamp)->baminfoU[0].info1.flag)
++#define bamptrC_get_flag(bamp)		(assert_c(bamp)((bamp)->baminfoC[0].info1.flagH<<FLAGL_BITS|(bamp)->baminfoC[0].info1.flagL))
++#define bamptrC_get_rev(bamp)           (assert_c(bamp)((bamp)->baminfoC[0].info1.flagH & (BAM_FREVERSE>>FLAGL_BITS)))
++#define bamptr_get_lib(h, bamp)		(assert_u(bamp)(bamp)->baminfoU[0].info1.libid)
++#define bamptr_get_offset_unclipped_pos(bamp)	(assert_u(bamp)(bamp)->baminfoU[0].info1.offset_unclipped_pos)
++#define bamptr_get_mate(bamp)		(assert_u(bamp)(bamp)->baminfoU[0].mate_bamp)
++#define bamptr_get_dup(bamp)            (assert_c(bamp)(0 != ((bamp)->baminfoC[0].info1.flagH & (BAM_FDUP>>FLAGL_BITS))))
++#define bamptr_get_unclip(bamp)         (assert_c(bamp)(bamp)->baminfoC[0].info1.unclip)
++#define bamptr_get_mapq(bamp)           (assert_u(bamp)((bamp)->baminfoU[0].info1.mapqH<<MAPQL_BITS|(bamp)->baminfoU[0].info1.mapqL))
++#define bamptr_get_tlen(bamp)		(assert_u(bamp)(bamp)->baminfoU[0].info1.tlen)
++
++#if defined(DEBUG_POS)  // FIXME
++void assert_bamptr__(bamptr_t *bamp, int is_unclipped) {
++  if ((is_unclipped && !bamp->_unclipped[0].unclipped) ||
++      (!is_unclipped && bamp->_unclipped[0].unclipped)) {
++    fprintf(stderr, "(E) assert_bamptr is_unclipped %d bamp->unclipped %d\n", is_unclipped, bamp->_unclipped[0].unclipped);
++   *(volatile int*)0;
++    exit(-1);
++  }
++}
++void assert_bamptr_mapped__(bamptr_t *bamp, int is_unclipped) {
++  if ((is_unclipped && (0 != (bamp->baminfoU[0].info1.flag & BAM_FUNMAP)))) {
++    fprintf(stderr, "(E) assert_bamptr_mapped is_unclipped %d unmap %d\n", is_unclipped, (0 != (bamp->baminfoU[0].info1.flag & BAM_FUNMAP)));
++    *(volatile int *)0;
++    exit(-1);
++  } else if (!is_unclipped&& (0 != (bamp->baminfoC[0].info1.flagL & BAM_FUNMAP))) {
++    fprintf(stderr, "(E) assert_bamptr_mapped is_unclipped %d unmap %d\n", is_unclipped, (0 != (bamp->baminfoC[0].info1.flagL & BAM_FUNMAP)));
++    *(volatile int *)0;
++    exit(-1);
++  }
++}
++void assert_bamptr_unmapped__(bamptr_t *bamp, int is_unclipped) {
++  if ((is_unclipped && (0 == (bamp->baminfoU[0].info1.flag & BAM_FUNMAP)))) {
++    fprintf(stderr, "(E) assert_bamptr_unmapped is_unclipped %d map %d\n", is_unclipped, (0 == (bamp->baminfoU[0].info1.flag & BAM_FUNMAP)));
++    *(volatile int *)0;
++    exit(-1);
++  } else if (!is_unclipped&& (0 == (bamp->baminfoC[0].info1.flagL & BAM_FUNMAP))) {
++    fprintf(stderr, "(E) assert_bamptr_unmapped is_unclipped %d map %d\n", is_unclipped, (0 == (bamp->baminfoC[0].info1.flagL & BAM_FUNMAP)));
++    *(volatile int *)0;
++    exit(-1);
++  }
++}
++#define assert_u(bamptr)		assert_bamptr__(bamptr, 1),
++#define assert_c(bamptr)		assert_bamptr__(bamptr, 0),
++#define assert_c_mapped(bamptr)		assert_bamptr_mapped__(bamptr, 0),
++#define assert_c_unmapped(bamptr)	assert_bamptr_unmapped__(bamptr, 0),
++#else
++#define assert_u(bamptr)		
++#define assert_c(bamptr)		
++#define assert_c_mapped(bamptr)		
++#define assert_c_unmapped(bamptr)
++#endif
++
++
+diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x q -x '*~' -x '*.c.*' -x '*.a' -x .git -x .svn -x '*.MIT' -x '*.swp' -x 'svn-commit.tmp*' 00_svn_r2/samtools-2015-08-19/samtools/bam_sam2bam.h.bak ../files/samtools/bam_sam2bam.h.bak
+--- 00_svn_r2/samtools-2015-08-19/samtools/bam_sam2bam.h.bak	1970-01-01 09:00:00.000000000 +0900
++++ ../files/samtools/bam_sam2bam.h.bak	2016-07-13 19:12:20.000000000 +0900
 @@ -0,0 +1,269 @@
 +/*  bam_sam2bam.h
 +
@@ -8362,6 +8694,33 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
      if (is_header_only) goto view_end; // no need to print alignments
  
      if (optind + 1 >= argc) { // convert/print the entire file
+diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x q -x '*~' -x '*.c.*' -x '*.a' -x .git -x .svn -x '*.MIT' -x '*.swp' -x 'svn-commit.tmp*' 00_svn_r2/samtools-2015-08-19/samtools/svn-commit.2.tmp ../files/samtools/svn-commit.2.tmp
+--- 00_svn_r2/samtools-2015-08-19/samtools/svn-commit.2.tmp	1970-01-01 09:00:00.000000000 +0900
++++ ../files/samtools/svn-commit.2.tmp	2016-12-09 18:29:45.931458316 +0900
+@@ -0,0 +1,5 @@
++Support HG38
++--This line, and those below, will be ignored--
++
++M    bam_sam2bam.c
++M    bam_sam2bam.h
+diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x q -x '*~' -x '*.c.*' -x '*.a' -x .git -x .svn -x '*.MIT' -x '*.swp' -x 'svn-commit.tmp*' 00_svn_r2/samtools-2015-08-19/samtools/svn-commit.3.tmp ../files/samtools/svn-commit.3.tmp
+--- 00_svn_r2/samtools-2015-08-19/samtools/svn-commit.3.tmp	1970-01-01 09:00:00.000000000 +0900
++++ ../files/samtools/svn-commit.3.tmp	2016-12-09 18:34:10.419133594 +0900
+@@ -0,0 +1,5 @@
++Support hg38
++--This line, and those below, will be ignored--
++
++M    bam_sam2bam.c
++M    bam_sam2bam.h
+diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x q -x '*~' -x '*.c.*' -x '*.a' -x .git -x .svn -x '*.MIT' -x '*.swp' -x 'svn-commit.tmp*' 00_svn_r2/samtools-2015-08-19/samtools/svn-commit.4.tmp ../files/samtools/svn-commit.4.tmp
+--- 00_svn_r2/samtools-2015-08-19/samtools/svn-commit.4.tmp	1970-01-01 09:00:00.000000000 +0900
++++ ../files/samtools/svn-commit.4.tmp	2016-12-09 18:39:20.711233094 +0900
+@@ -0,0 +1,5 @@
++Support hg38
++--This line, and those below, will be ignored--
++
++M    bam_sam2bam.c
++M    bam_sam2bam.h
 diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x q -x '*~' -x '*.c.*' -x '*.a' -x .git -x .svn -x '*.MIT' -x '*.swp' -x 'svn-commit.tmp*' 00_svn_r2/samtools-2015-08-19/samtools/test.c ../files/samtools/test.c
 --- 00_svn_r2/samtools-2015-08-19/samtools/test.c	1970-01-01 09:00:00.000000000 +0900
 +++ ../files/samtools/test.c	2016-01-25 18:56:16.570978207 +0900

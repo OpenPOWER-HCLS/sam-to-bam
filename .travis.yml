@@ -1,0 +1,40 @@
+sudo: required
+dist: trusty
+language: c
+before_install:
+  - sudo apt-get -qq update
+  - sudo apt-get install -y libgoogle-perftools-dev
+install:
+ - cd ..
+ - mkdir -p samtools-2015-08-19
+ - mkdir -p source
+ - mkdir -p build
+ - echo Download the files
+ - cd samtools-2015-08-19
+ - git clone git://github.com/samtools/samtools.git
+ - git clone git://github.com/samtools/htslib.git
+ - cd ../source
+ - mv ../sam-to-bam .
+ - cd ../samtools-2015-08-19/samtools
+ - git checkout 0c5617ecd9c3930024bfcec02ac0796c1abfbd67 >& /dev/null
+ - cd ../htslib
+ - git checkout d75415141386bd7af4a3b0c18ce9c72b58c0895e >& /dev/null
+ - cd ../..
+ - echo Create the source files
+ - source/sam-to-bam/patches/run_patch.sh
+ - cd build
+script:
+ - cd samtools
+ - make
+ - cd ../prefilter
+ - make
+ - #cd ../hw_zlib
+ - #make
+ - cd ../sort_by_coordinate
+ - make
+ - cd ../samtools
+ - mkdir filter.d accelerator.d
+ - ln -s ${PWD}/../prefilter/lib_pre_filter.so filter.d/
+ - ln -s ${PWD}/../sort_by_coordinate/lib_sort_by_coordinate.so filter.d/
+ - ln -s ${PWD}/../hw_zlib/libz_hw.so accelerator.d/
+ - cp -p ../../source/sam-to-bam/ppc64le/lib_ibm_markdup.so filter.d/

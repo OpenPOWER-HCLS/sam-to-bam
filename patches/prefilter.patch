@@ -17,7 +17,7 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 # DEALINGS IN THE SOFTWARE.
-diff -uprN -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x q -x '*~' -x '*.c.*' -x '*.a' -x .git -x .svn -x '*.MIT' -x '*.swp' 00_svn_r2/samtools-2015-08-19/prefilter/Makefile ../files/prefilter/Makefile
+diff -uprN -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x q -x '*~' -x '*.c.*' -x '*.a' -x .git -x .svn -x '*.MIT' -x '*.swp' -x 'svn-commit.tmp*' 00_svn_r2/samtools-2015-08-19/prefilter/Makefile ../files/prefilter/Makefile
 --- 00_svn_r2/samtools-2015-08-19/prefilter/Makefile	1970-01-01 09:00:00.000000000 +0900
 +++ ../files/prefilter/Makefile	2016-09-12 18:02:50.410201336 +0900
 @@ -0,0 +1,52 @@
@@ -73,7 +73,7 @@ diff -uprN -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x q -x '*~' -x
 +
 +clean: 
 +	-rm -f $(PROGRAM) $(LIB_OBJS)
-diff -uprN -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x q -x '*~' -x '*.c.*' -x '*.a' -x .git -x .svn -x '*.MIT' -x '*.swp' 00_svn_r2/samtools-2015-08-19/prefilter/prefilter.c ../files/prefilter/prefilter.c
+diff -uprN -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x q -x '*~' -x '*.c.*' -x '*.a' -x .git -x .svn -x '*.MIT' -x '*.swp' -x 'svn-commit.tmp*' 00_svn_r2/samtools-2015-08-19/prefilter/prefilter.c ../files/prefilter/prefilter.c
 --- 00_svn_r2/samtools-2015-08-19/prefilter/prefilter.c	1970-01-01 09:00:00.000000000 +0900
 +++ ../files/prefilter/prefilter.c	2016-03-11 11:03:10.488492259 +0900
 @@ -0,0 +1,264 @@
