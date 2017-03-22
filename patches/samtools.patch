@@ -19,7 +19,7 @@
 # DEALINGS IN THE SOFTWARE.
 diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x q -x '*~' -x '*.c.*' -x '*.a' -x .git -x .svn -x '*.MIT' -x '*.swp' -x 'svn-commit.tmp*' 00_svn_r2/samtools-2015-08-19/samtools/bam_sam2bam.c ../files/samtools/bam_sam2bam.c
 --- 00_svn_r2/samtools-2015-08-19/samtools/bam_sam2bam.c	1970-01-01 09:00:00.000000000 +0900
-+++ ../files/samtools/bam_sam2bam.c	2017-03-17 15:43:17.450837623 +0900
++++ ../files/samtools/bam_sam2bam.c	2017-03-22 12:27:45.808886809 +0900
 @@ -0,0 +1,7982 @@
 +#define _BAM_SAM2BAM_C
 +/*  bam_sam2bam.c
@@ -1217,12 +1217,12 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +#define ILM_MAX_LANE	((1UL<<ILM_BITS_LANE)-1)
 +#define ILM_MAX_INST	((1UL<<ILM_BITS_INST)-1)
 +
-+#define ILM18_BITS_Y	19
++#define ILM18_BITS_Y	18
 +#define ILM18_BITS_X	16
 +#define ILM18_BITS_TILE	13
 +#define ILM18_BITS_LANE	4
 +#define ILM18_BITS_FLOW	2
-+#define ILM18_BITS_RUN	8
++#define ILM18_BITS_RUN	9
 +#define ILM18_BITS_INST	2
 +#define ILM18_MAX_Y	((1UL<<ILM18_BITS_Y)-1)
 +#define ILM18_MAX_X	((1UL<<ILM18_BITS_X)-1)
@@ -1260,8 +1260,8 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +  char **id_array = NULL;
 +  uint64_t max = 0;
 +  switch(type){
-+  case ilmInst:		id_array = inst; 	max = ILM_MAX_LANE; break;
-+  case ilm18Inst:	id_array = inst18; 	max = ILM18_MAX_LANE; break;
++  case ilmInst:		id_array = inst; 	max = ILM_MAX_INST; break;
++  case ilm18Inst:	id_array = inst18; 	max = ILM18_MAX_INST; break;
 +  case ilm18Flowcell:	id_array = flowcell18; 	max = ILM18_MAX_FLOW; break;
 +  }
 +  long i;
@@ -1342,16 +1342,16 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +  int const instID = getIlluminaFieldID(ilmInst, qn, s);
 +  if (instID != -1) {
 +    uint64_t vl = strtol(s+1, &endp, 10);
-+    if ((s+1 < endp && ':' == *endp) || vl-1 <= ILM_MAX_LANE){ // v is lane
++    if ((s+1 < endp && ':' == *endp) && vl-1 <= ILM_MAX_LANE){ // v is lane
 +      char * endp2;
 +      uint64_t vn = strtol(endp+1, &endp2, 10);
-+      if ((endp+1 < endp2 && ':' == *endp2) || vn <= ILM_MAX_TILE){ // v is number within lane
++      if ((endp+1 < endp2 && ':' == *endp2) && vn <= ILM_MAX_TILE){ // v is number within lane
 +        char * endp3;
 +        uint64_t vx = strtol(endp2+1, &endp3, 10);
-+        if ((endp2+1 < endp3 && ':' == *endp3) || vx <= ILM_MAX_X){ // v is x
++        if ((endp2+1 < endp3 && ':' == *endp3) && vx <= ILM_MAX_X){ // v is x
 +          char * endp4;
 +          uint64_t vy = strtol(endp3+1, &endp4, 10);
-+          if (endp3+1 < endp4 || vy <= ILM_MAX_Y){ // v is y
++          if (endp3+1 < endp4 && vy <= ILM_MAX_Y){ // v is y
 +	    // | instrument id | lane no. | tile no. | x       | y       | 
 +	    // |       8 bits  | 5 bits   | 14 bits  | 17 bits | 20 bits |
 +  	    c = ((uint64_t)instID)<<(ILM_BITS_LANE+ILM_BITS_TILE+ILM_BITS_X+ILM_BITS_Y)
@@ -1445,7 +1445,7 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +  int const instID = getIlluminaFieldID(ilm18Inst, qn, s);
 +  if (instID != -1) {
 +    uint64_t vr = strtol(s+1, &endp, 10);
-+    if ((s+1 < endp && ':' == *endp) || vr <= ILM18_MAX_RUN){ // v is run id
++    if ((s+1 < endp && ':' == *endp) && vr <= ILM18_MAX_RUN){ // v is run id
 +      char * endp2;
 +      endp2 = index(endp+1, ':');
 +      if (endp+1 < endp2 && ':' == *endp2){ // v is flowcell id
@@ -1453,16 +1453,16 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +        if (flowcellID != -1) {
 +          char * endp3;
 +          uint64_t vl = strtol(endp2+1, &endp3, 10);
-+          if ((endp2+1 < endp3 && ':' == *endp3) || vl <= ILM18_MAX_LANE){ // v is lane 
++          if ((endp2+1 < endp3 && ':' == *endp3) && vl <= ILM18_MAX_LANE){ // v is lane 
 +            char * endp4;
 +            uint64_t vn = strtol(endp3+1, &endp4, 10);
-+            if (endp3+1 < endp4 || vn <= ILM18_MAX_TILE){ // v is tile 
++            if (endp3+1 < endp4 && vn <= ILM18_MAX_TILE){ // v is tile 
 +              char * endp5;
 +              uint64_t vx = strtol(endp4+1, &endp5, 10);
-+              if (endp4+1 < endp5 || vx <= ILM18_MAX_X){ // v is x 
++              if (endp4+1 < endp5 && vx <= ILM18_MAX_X){ // v is x 
 +                char * endp6;
 +                uint64_t vy = strtol(endp5+1, &endp6, 10);
-+                if (endp5+1 < endp6 || vy <= ILM18_MAX_Y){ // v is y 
++                if (endp5+1 < endp6 && vy <= ILM18_MAX_Y){ // v is y 
 +    	          // | instrument id | run no. | flowcell | lane no. | tile no. | x       | y       | 
 +    	          // |       2 bits  | 8 bits  | 2 bits   | 5 bits   | 14 bits  | 17 bits | 20 bits |
 +      	          c = ((uint64_t)instID)<<(ILM18_BITS_RUN+ILM18_BITS_FLOW+ILM18_BITS_LANE+ILM18_BITS_TILE+ILM18_BITS_X+ILM18_BITS_Y)
@@ -1759,10 +1759,6 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +  uint64_t const org =  (qnameid & (((1UL<<SRA_BITS_ORG) - 1)<<(SRA_BITS_ACC+SRA_BITS_SPOT)))>>(SRA_BITS_ACC+SRA_BITS_SPOT); 
 +  //               12345678901234567890		20 digits
 +  //  ULONG_MAX    18446744073709551615 UL
-+  if (l_qname < 3/*xRR*/+20+1/*.*/+20+1) {
-+    fprintf(stderr, "(E) length of string buffer %ld must be >=%d\n", l_qname, 3+20+1+20+1);
-+    exit(-1);
-+  }
 +  int n = 3;
 +  str[0] = (org==0 ? 'S' : (org==1 ? 'E' : 'D'));
 +  str[1] = 'R';
@@ -1771,6 +1767,10 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +  str[n++] = '.';
 +  n += snprintf(&str[n], l_qname-n, "%lu", spot);
 +  *len = n;
++  if (n + 1/*\0*/ > l_qname) {
++    fprintf(stderr, "(E) length of string buffer %ld must be >=%d\n", l_qname, n + 1);
++    exit(-1);
++  }
 +}
 +
 +static inline void get_qname_illumina(uint64_t qnameid, char *str, long l_qname, long *len) {
@@ -1781,12 +1781,8 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +  uint64_t const ix = (qnameid & (((1UL<<ILM_BITS_INST) - 1)<<(ILM_BITS_LANE+ILM_BITS_TILE+ILM_BITS_X+ILM_BITS_Y)))>>(ILM_BITS_LANE+ILM_BITS_TILE+ILM_BITS_X+ILM_BITS_Y); 
 +  //               12345678901234567890		20 digits
 +  //  ULONG_MAX    18446744073709551615 UL
-+  if (l_qname < 30/*instrument*/+1/*:*/+20+1/*:*/+20+1/*:*/+20+1/*:*/+20+1) {
-+    fprintf(stderr, "(E) length of string buffer %ld must be >=%d\n", l_qname, 30/*instrument*/+1/*:*/+20+1/*:*/+20+1/*:*/+20+1/*:*/+20+1);
-+    exit(-1);
-+  }
-+  strcpy(str, inst[ix]);
-+  int n = strlen(str);
++  int n = strlen(inst[ix]);
++  memcpy(str, inst[ix], n);
 +  str[n++] = ':';
 +  n += snprintf(&str[n], l_qname-n, "%lu", lane+1);
 +  str[n++] = ':';
@@ -1796,6 +1792,10 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +  str[n++] = ':';
 +  n += snprintf(&str[n], l_qname-n, "%lu", y);
 +  *len = n;
++  if (n + 1/*\0*/ > l_qname) {
++    fprintf(stderr, "(E) length of string buffer %ld must be >=%d\n", l_qname, n + 1);
++    exit(-1);
++  }
 +}
 +
 +static inline void get_qname_illumina18(uint64_t qnameid, char *str, long l_qname, long *len) {
@@ -1813,18 +1813,14 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +  								>>(ILM18_BITS_RUN+ILM18_BITS_FLOW+ILM18_BITS_LANE+ILM18_BITS_TILE+ILM18_BITS_X+ILM18_BITS_Y); 
 +  //               12345678901234567890		20 digits
 +  //  ULONG_MAX    18446744073709551615 UL
-+  if (l_qname < 30/*instrument*/+1/*:*/+20+1/*:*/+30/*flowcell*/+1/*:*/+20+1/*:*/+20+1/*:*/+20+1/*:*/+20+1) {
-+    fprintf(stderr, "(E) length of string buffer %ld must be >=%d\n", l_qname,
-+    		30/*instrument*/+1/*:*/+20+1/*:*/+30/*flowcell*/+1/*:*/+20+1/*:*/+20+1/*:*/+20+1/*:*/+20+1);
-+    exit(-1);
-+  }
-+  strcpy(str, inst18[ix]);
-+  int n = strlen(str);
++  int n = strlen(inst18[ix]);
++  memcpy(str, inst18[ix], n);
 +  str[n++] = ':';
 +  n += snprintf(&str[n], l_qname-n, "%lu", run);
 +  str[n++] = ':';
-+  strcpy(&str[n], flowcell18[fx]);
-+  n += strlen(flowcell18[fx]);
++  int const nf = strlen(flowcell18[fx]);
++  memcpy(&str[n], flowcell18[fx], nf);
++  n += nf;
 +  str[n++] = ':';
 +  n += snprintf(&str[n], l_qname-n, "%lu", lane+1);
 +  str[n++] = ':';
@@ -1834,6 +1830,10 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +  str[n++] = ':';
 +  n += snprintf(&str[n], l_qname-n, "%lu", y);
 +  *len = n;
++  if (n + 1/*\0*/ > l_qname) {
++    fprintf(stderr, "(E) length of string buffer %ld must be >=%d\n", l_qname, n + 1);
++    exit(-1);
++  }
 +}
 +
 +static void get_qname(uint64_t qnameid, char *qname, long l_qname, long *len) {
@@ -6594,7 +6594,7 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +    uint64_t qnid1 = bamptr_get_qnameid(bamp1);
 +    uint64_t qnid2 = bamptr_get_qnameid(bamp2);
 +    if (qnid1 != qnid2) {
-+      char str1[256], str2[256];
++      char str1[128], str2[128];
 +      long len1, len2;
 +      get_qname(qnid1,str1,sizeof(str1),&len1);
 +      get_qname(qnid2,str2,sizeof(str2),&len2);
@@ -6739,7 +6739,7 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +//	4. QNAME
 +  bamptr_t *u_bamp1 = NULL;
 +  bamptr_t *u_bamp2 = NULL;
-+  char str1[256], str2[256];
++  char str1[128], str2[128];
 +  long len1, len2;
 +  uint64_t qnid1, qnid2;
 +  if (0 == (flag1 & BAM_FUNMAP)) {
