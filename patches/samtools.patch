@@ -7343,7 +7343,7 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +
 +#if defined(__powerpc64__)
 +    if (g_n_inputs > 1) {
-+      n_block_reader = 3; // tuned for GPFS
++      n_block_reader = 1; // tuned for GPFS
 +    }
 +	  switch(n_physical_cores){
 +	 case 24:  // e.g., power8
