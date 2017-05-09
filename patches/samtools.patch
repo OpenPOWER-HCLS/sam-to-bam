@@ -7959,8 +7959,8 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +	    fprintf(stderr, "(I) filter %s args %s\n", filters.args->args[filters.args->n-1].name, filters.args->args[filters.args->n-1].args);
 +	  } else {
 +	    fprintf(stderr, "(E) ignore -F %s since ':' is not found\n", optarg);
-+       if(!strcmp(optarg,"ibm_markdup"))
 +       #ifdef  __powerpc64__
++       if(!strcmp(optarg,"ibm_markdup"))
 +       fprintf(stderr, "(E) do you mean -Fibm_markdup: or -Fibm_markdup:r?\n");
 +       #endif
 +       exit(1);
