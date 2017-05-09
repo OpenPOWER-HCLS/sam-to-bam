@@ -7101,8 +7101,8 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +    if (found) {
 +      load_filter(buf, ent_arr[ii]);
 +    } else {
-+      fprintf(stderr, "(W) FILTER: %s not found under %s\n", filters.args->args[i].name, buf);
-       exit(1);
++      fprintf(stderr, "(E) FILTER: %s not found under %s\n", filters.args->args[i].name, buf);
++      exit(1);
 +    }
 +  }
 +  if (filters.funcs[api_analyze_data].n || filters.funcs[api_do_filter].n) {
@@ -7959,12 +7959,11 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +	    fprintf(stderr, "(I) filter %s args %s\n", filters.args->args[filters.args->n-1].name, filters.args->args[filters.args->n-1].args);
 +	  } else {
 +	    fprintf(stderr, "(E) ignore -F %s since ':' is not found\n", optarg);
-        if(!strcmp(optarg,"ibm_markdup"))
-#ifdef  __powerpc64__
-fprintf(stderr, "(E) do you mean -Fibm_markdup: or -Fibm_markdup:r?\n");
-#endif
-        exit(1);
-
++       if(!strcmp(optarg,"ibm_markdup"))
++       #ifdef  __powerpc64__
++       fprintf(stderr, "(E) do you mean -Fibm_markdup: or -Fibm_markdup:r?\n");
++       #endif
++       exit(1);
 +	  }
 +	  break;
 +	}
