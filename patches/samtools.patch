@@ -1221,9 +1221,9 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +#define ILM18_BITS_X	16
 +#define ILM18_BITS_TILE	13
 +#define ILM18_BITS_LANE	4
-+#define ILM18_BITS_FLOW	2
-+#define ILM18_BITS_RUN	9
-+#define ILM18_BITS_INST	2
++#define ILM18_BITS_FLOW	3
++#define ILM18_BITS_RUN	7
++#define ILM18_BITS_INST	3
 +#define ILM18_MAX_Y	((1UL<<ILM18_BITS_Y)-1)
 +#define ILM18_MAX_X	((1UL<<ILM18_BITS_X)-1)
 +#define ILM18_MAX_TILE	((1UL<<ILM18_BITS_TILE)-1)
