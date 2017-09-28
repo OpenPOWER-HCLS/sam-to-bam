@@ -39,9 +39,6 @@ git clone https://${IP}/samtools/samtools.git
 git clone https://${IP}/samtools/htslib.git
 cd ../${SRC}
 git clone https://${IP}/OpenPOWER-HCLS/sam-to-bam.git
-cd sam-to-bam
-git checkout patch2
-cd ..
 cd ../${ORG}/samtools
 git checkout 0c5617ecd9c3930024bfcec02ac0796c1abfbd67 >& /dev/null
 cd ../htslib
