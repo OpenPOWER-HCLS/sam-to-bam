@@ -1219,8 +1219,8 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +
 +#define ILM18_BITS_Y	18
 +#define ILM18_BITS_X	15
-+#define ILM18_BITS_TILE	14
-+#define ILM18_BITS_LANE	4
++#define ILM18_BITS_TILE	15
++#define ILM18_BITS_LANE	3
 +#define ILM18_BITS_FLOW	3
 +#define ILM18_BITS_RUN	8
 +#define ILM18_BITS_INST	2
@@ -1453,7 +1453,7 @@ diff -uprN -x '*_Jul11' -x 'ibm_*' -x 'Numer*' -x a.out -x '#*#' -x version.h -x
 +        if (flowcellID != -1) {
 +          char * endp3;
 +          uint64_t vl = strtol(endp2+1, &endp3, 10);
-+          if ((endp2+1 < endp3 && ':' == *endp3) && vl <= ILM18_MAX_LANE){ // v is lane 
++          if ((endp2+1 < endp3 && ':' == *endp3) && vl-1 <= ILM18_MAX_LANE){ // v is lane 
 +            char * endp4;
 +            uint64_t vn = strtol(endp3+1, &endp4, 10);
 +            if (endp3+1 < endp4 && vn <= ILM18_MAX_TILE){ // v is tile 
